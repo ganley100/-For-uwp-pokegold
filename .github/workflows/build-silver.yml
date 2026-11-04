@@ -1,0 +1,45 @@
+name: Build Silver ROM
+
+on:
+  push:
+    branches: [ claude/build-silver ]
+  workflow_dispatch:
+
+env:
+  rgbds_version: v1.0.4
+
+jobs:
+  build-silver:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout rgbds
+        uses: actions/checkout@v4
+        with:
+          path: rgbds
+          ref: ${{ env.rgbds_version }}
+          repository: gbdev/rgbds
+
+      - name: Install rgbds
+        working-directory: rgbds
+        run: |
+          sudo apt-get update
+          sudo apt-get install -yq bison libpng-dev pkg-config
+          sudo make -j$(nproc) install
+
+      - name: Remove rgbds
+        run: rm -rf rgbds
+
+      - name: Build pokesilver.gbc
+        run: |
+          make -j$(nproc) pokesilver.gbc
+          sha1sum pokesilver.gbc
+
+      - name: Upload ROM
+        uses: actions/upload-artifact@v4
+        with:
+          name: pokesilver
+          path: pokesilver.gbc
+          if-no-files-found: error
