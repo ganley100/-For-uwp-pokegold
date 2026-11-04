@@ -3,7 +3,7 @@
 # Needs:
 #   OO_PS4_TOOLCHAIN   path to the extracted OpenOrbis toolchain
 #   GAMBATTE_DIR       checkout of libretro/gambatte-libretro   (default: ./gambatte)
-#   assets/rom/pokesilver.gbc   ROM built by `make pokesilver.gbc` at the repo root
+#   assets/misc/pokesilver.gbc  ROM built by `make pokesilver.gbc` at the repo root
 #   clang, clang++, ld.lld on PATH (or override CC/CXX/LD)
 
 TITLE       := Silver

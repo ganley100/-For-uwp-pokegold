@@ -42,7 +42,7 @@ constexpr unsigned SAMPLES_PER_FRAME = 35112;   // GB native rate: 2097152 Hz
 constexpr unsigned DECIMATE = 64;               // 2097152 / 64 = 32768 Hz
 constexpr int OUT_RATE = 2097152 / DECIMATE;
 
-const char *const ROM_PATH  = "/app0/assets/rom/pokesilver.gbc";
+const char *const ROM_PATH  = "/app0/assets/misc/pokesilver.gbc";
 const char *const SAVE_DIR  = "/data/pokesilver";
 const char *const SAVE_PATH = "/data/pokesilver/pokesilver.srm";
 const char *const RTC_PATH  = "/data/pokesilver/pokesilver.rtc";
@@ -393,7 +393,7 @@ int main(int, char *[])
 
    static Emulator emulator;   // large; keep off the stack
    if (!emulator.Load())
-      Halt("loading " "/app0/assets/rom/pokesilver.gbc");
+      Halt("loading " "/app0/assets/misc/pokesilver.gbc");
 
    SDL_AudioSpec want{}, have{};
    want.freq     = OUT_RATE;
