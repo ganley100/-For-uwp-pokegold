@@ -1,0 +1,8 @@
+<Project>
+  <!-- Plain C/C++ (C++/WinRT), not C++/CX: never compile with /ZW. -->
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <CompileAsWinRT>false</CompileAsWinRT>
+    </ClCompile>
+  </ItemDefinitionGroup>
+</Project>

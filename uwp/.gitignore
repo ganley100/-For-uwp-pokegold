@@ -1,0 +1,6 @@
+build/
+rom/
+gambatte/
+out/
+*.pfx
+*.cer
