@@ -43,12 +43,9 @@ target_compile_definitions(gambatte PUBLIC
 target_compile_options(gambatte PRIVATE /W1 /EHsc /O2 /sdl- /Zc:__cplusplus)
 
 # ---- App ----
-set(ASSETS
-  Assets/StoreLogo.png
-  Assets/Square44x44Logo.png
-  Assets/Square150x150Logo.png
-  Assets/Wide310x150Logo.png
-  Assets/SplashScreen.png)
+# App icon / tile / splash art (base size plus .scale-200 variants).
+file(GLOB ASSETS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/Assets/*.png")
 set_property(SOURCE ${ASSETS} PROPERTY VS_DEPLOYMENT_CONTENT 1)
 set_property(SOURCE ${ASSETS} PROPERTY VS_DEPLOYMENT_LOCATION "Assets")
 set_property(SOURCE "${ROM_FILE}" PROPERTY VS_DEPLOYMENT_CONTENT 1)

@@ -28,11 +28,11 @@
       <uap:VisualElements
         DisplayName="Pokemon Silver"
         Description="Pokemon Silver, built from the pokegold disassembly, running on an embedded Game Boy Color core."
-        BackgroundColor="#464e5c"
+        BackgroundColor="#767676"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">
         <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
-        <uap:SplashScreen Image="Assets\SplashScreen.png" BackgroundColor="#464e5c" />
+        <uap:SplashScreen Image="Assets\SplashScreen.png" BackgroundColor="#767676" />
       </uap:VisualElements>
     </Application>
   </Applications>
