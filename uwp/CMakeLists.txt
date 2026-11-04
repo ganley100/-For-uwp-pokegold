@@ -40,7 +40,7 @@ target_include_directories(gambatte PUBLIC
   "${GAMBATTE_DIR}/common")
 target_compile_definitions(gambatte PUBLIC
   __LIBRETRO__ HAVE_STDINT_H HAVE_INTTYPES_H _CRT_SECURE_NO_WARNINGS _CRT_SECURE_NO_DEPRECATE)
-target_compile_options(gambatte PRIVATE /W1 /EHsc /O2)
+target_compile_options(gambatte PRIVATE /W1 /EHsc /O2 /sdl- /Zc:__cplusplus)
 
 # ---- App ----
 set(ASSETS
@@ -62,5 +62,5 @@ endif()
 add_executable(PokeSilver WIN32 ${APP_SOURCES})
 target_link_libraries(PokeSilver PRIVATE gambatte windowsapp d3d11 dxgi xaudio2)
 target_compile_definitions(PokeSilver PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
-target_compile_options(PokeSilver PRIVATE /EHsc /bigobj /permissive- /O2)
+target_compile_options(PokeSilver PRIVATE /EHsc /bigobj /permissive- /O2 /sdl- /Zc:__cplusplus)
 set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT PokeSilver)
