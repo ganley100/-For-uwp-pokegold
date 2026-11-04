@@ -29,7 +29,7 @@ LIBS         := -lc -lkernel -lc++ -lSceUserService -lSceVideoOut -lSceAudioOut 
 
 DEFINES      := -D__LIBRETRO__ -DHAVE_STDINT_H -DHAVE_INTTYPES_H
 INCLUDES     := -I$(GB)/include -I$(GB)/src -I$(GB)/libretro -I$(GB)/libretro-common/include -I$(GAMBATTE_DIR)/common
-CXXFLAGS     := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -O2 -std=c++14 -w \
+CXXFLAGS     := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -O2 -w \
                 -isysroot $(TOOLCHAIN) -isystem $(TOOLCHAIN)/include -isystem $(TOOLCHAIN)/include/c++/v1 \
                 $(DEFINES) $(INCLUDES)
 LDFLAGS      := -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x --eh-frame-hdr -L$(TOOLCHAIN)/lib $(LIBS) $(TOOLCHAIN)/lib/crt1.o
