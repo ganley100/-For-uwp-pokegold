@@ -1,10 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-  IgnorableNamespaces="uap">
+  IgnorableNamespaces="uap mp">
 
   <Identity Name="PokeSilverUWP" Publisher="CN=PokeSilverUWP" Version="1.0.0.0" />
+
+  <mp:PhoneIdentity PhoneProductId="6b1f6a0e-3c2d-4f5e-9a1b-2c7d8e9f0a11" PhonePublisherId="00000000-0000-0000-0000-000000000000" />
 
   <Properties>
     <DisplayName>Pokemon Silver</DisplayName>
