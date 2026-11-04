@@ -1,0 +1,99 @@
+name: Build Silver PS4 (homebrew pkg)
+
+on:
+  push:
+    branches: [ claude/build-silver ]
+  workflow_dispatch:
+
+env:
+  rgbds_version: v1.0.4
+  gambatte_ref: 77f2567d718b8973d02caa2daa8dce4953faf811
+  oo_version: v0.5.2
+  oo_sha256: 92457ea5cb4b5fe80ca45a578f7899458fec5634143c7091a605cde823941334
+
+jobs:
+  rom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout rgbds
+        uses: actions/checkout@v4
+        with:
+          path: rgbds
+          ref: ${{ env.rgbds_version }}
+          repository: gbdev/rgbds
+
+      - name: Install rgbds
+        working-directory: rgbds
+        run: |
+          sudo apt-get update
+          sudo apt-get install -yq bison libpng-dev pkg-config
+          sudo make -j$(nproc) install
+
+      - name: Build pokesilver.gbc
+        run: |
+          rm -rf rgbds
+          make -j$(nproc) pokesilver.gbc
+          echo "49b163f7e57702bc939d642a18f591de55d92dae  pokesilver.gbc" | sha1sum -c -
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pokesilver-rom-ps4
+          path: pokesilver.gbc
+          if-no-files-found: error
+
+  ps4:
+    needs: rom
+    runs-on: ubuntu-22.04
+    env:
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout gambatte-libretro
+        uses: actions/checkout@v4
+        with:
+          repository: libretro/gambatte-libretro
+          ref: ${{ env.gambatte_ref }}
+          path: ps4/gambatte
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: pokesilver-rom-ps4
+          path: ps4/assets/rom
+
+      - name: Install clang and lld
+        run: |
+          sudo apt-get update
+          sudo apt-get install -yq clang lld
+          clang --version
+
+      - name: Install OpenOrbis PS4 toolchain
+        run: |
+          curl -sSL -o oo.tar.gz "https://github.com/OpenOrbis/OpenOrbis-PS4-Toolchain/releases/download/${oo_version}/${oo_version}.tar.gz"
+          echo "${oo_sha256}  oo.tar.gz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/oosdk"
+          tar -xzf oo.tar.gz -C "$RUNNER_TEMP/oosdk" --strip-components=2
+          rm oo.tar.gz
+          chmod +x "$RUNNER_TEMP/oosdk/bin/linux/"*
+          echo "OO_PS4_TOOLCHAIN=$RUNNER_TEMP/oosdk" >> "$GITHUB_ENV"
+
+      - name: Add runtime modules from the toolchain's SDL2 sample
+        run: |
+          mkdir -p ps4/sce_module ps4/sce_sys/about
+          cp "$OO_PS4_TOOLCHAIN/samples/SDL2/sce_module/"* ps4/sce_module/
+          cp "$OO_PS4_TOOLCHAIN/samples/SDL2/sce_sys/about/right.sprx" ps4/sce_sys/about/
+
+      - name: Build pkg
+        working-directory: ps4
+        run: |
+          make -j$(nproc) eboot.bin
+          make
+          ls -la *.pkg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pokesilver-ps4-pkg
+          path: ps4/*.pkg
+          if-no-files-found: error

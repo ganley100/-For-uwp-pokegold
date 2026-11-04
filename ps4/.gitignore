@@ -1,0 +1,9 @@
+build/
+gambatte/
+assets/
+sce_module/
+sce_sys/about/
+sce_sys/param.sfo
+eboot.bin
+pkg.gp4
+*.pkg
