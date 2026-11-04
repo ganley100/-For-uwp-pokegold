@@ -54,12 +54,25 @@ set_property(SOURCE ${ASSETS} PROPERTY VS_DEPLOYMENT_LOCATION "Assets")
 set_property(SOURCE "${ROM_FILE}" PROPERTY VS_DEPLOYMENT_CONTENT 1)
 set_property(SOURCE "${ROM_FILE}" PROPERTY VS_DEPLOYMENT_LOCATION "Rom")
 
-set(APP_SOURCES src/App.cpp Package.appxmanifest ${ASSETS} "${ROM_FILE}")
+# Shaders are compiled by fxc during the build into C headers.
+set(SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/shaders")
+set_source_files_properties(shaders/FullscreenVS.hlsl PROPERTIES
+  VS_SHADER_TYPE Vertex VS_SHADER_MODEL 4.0 VS_SHADER_ENTRYPOINT main
+  VS_SHADER_OUTPUT_HEADER_FILE "${SHADER_DIR}/FullscreenVS.h"
+  VS_SHADER_VARIABLE_NAME g_FullscreenVS)
+set_source_files_properties(shaders/SharpBilinearPS.hlsl PROPERTIES
+  VS_SHADER_TYPE Pixel VS_SHADER_MODEL 4.0 VS_SHADER_ENTRYPOINT main
+  VS_SHADER_OUTPUT_HEADER_FILE "${SHADER_DIR}/SharpBilinearPS.h"
+  VS_SHADER_VARIABLE_NAME g_SharpBilinearPS)
+
+set(APP_SOURCES src/App.cpp Package.appxmanifest ${ASSETS} "${ROM_FILE}"
+  shaders/FullscreenVS.hlsl shaders/SharpBilinearPS.hlsl)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/PokeSilver.pfx")
   list(APPEND APP_SOURCES PokeSilver.pfx)
 endif()
 
 add_executable(PokeSilver WIN32 ${APP_SOURCES})
+target_include_directories(PokeSilver PRIVATE "${SHADER_DIR}")
 target_link_libraries(PokeSilver PRIVATE gambatte windowsapp d3d11 dxgi xaudio2)
 target_compile_definitions(PokeSilver PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
 target_compile_options(PokeSilver PRIVATE /EHsc /bigobj /permissive- /O2 /sdl- /Zc:__cplusplus)

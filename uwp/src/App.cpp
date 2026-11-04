@@ -26,6 +26,7 @@
 #include <winrt/Windows.UI.ViewManagement.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -35,6 +36,10 @@
 
 #include "gambatte.h"
 #include "gambatte_log.h"
+
+// Compiled at build time by fxc (see CMakeLists.txt).
+#include "FullscreenVS.h"
+#include "SharpBilinearPS.h"
 
 // ---- Symbols libgambatte expects from its (omitted) libretro frontend ----
 extern "C" void gambatte_log(enum retro_log_level, const char *format, ...)
@@ -115,6 +120,9 @@ public:
       gb_.setInputGetter(&joypad_);
       if (gb_.load(rom_.data(), static_cast<unsigned>(rom_.size()), 0) != 0)
          return false;
+      // The core defaults to simulating the GBC's dim, washed-out LCD.
+      // Output the game's real colours instead for a bright picture on a TV.
+      gb_.setColorCorrection(false);
 
       savePath_ = saveDir + L"\\pokesilver.srm";
       rtcPath_  = saveDir + L"\\pokesilver.rtc";
@@ -283,11 +291,13 @@ private:
 class Renderer
 {
 public:
+   enum class Mode { Fit, Stretch };
+
    void Init(wuc::CoreWindow const &window)
    {
       static const D3D_FEATURE_LEVEL levels[] = {
          D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0,
-         D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_9_3 };
+         D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0 };
       winrt::check_hresult(D3D11CreateDevice(
          nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
          levels, ARRAYSIZE(levels), D3D11_SDK_VERSION, device_.put(), nullptr, context_.put()));
@@ -312,6 +322,7 @@ public:
       winrt::check_hresult(factory->CreateSwapChainForCoreWindow(
          device_.get(), winrt::get_unknown(window), &sd, nullptr, swapChain_.put()));
       CreateTargets();
+      CreatePipeline();
    }
 
    void Resize(wuc::CoreWindow const &window)
@@ -321,41 +332,55 @@ public:
       if (!swapChain_ || (oldW == width_ && oldH == height_))
          return;
       rtv_ = nullptr;
-      backBuffer_ = nullptr;
       context_->ClearState();
       context_->Flush();
       winrt::check_hresult(swapChain_->ResizeBuffers(2, width_, height_, DXGI_FORMAT_B8G8R8A8_UNORM, 0));
       CreateTargets();
    }
 
+   void SetMode(Mode mode) { mode_ = mode; }
+   Mode GetMode() const { return mode_; }
+
    void Draw(const gambatte::video_pixel_t *frame)
    {
-      // Largest integer scale that fits: crisp pixels, no shaders needed.
-      UINT scale = std::max<UINT>(1, std::min(width_ / GB_W, height_ / GB_H));
-      if (scale != scale_ || !scaled_)
-         CreateScaled(scale);
+      context_->UpdateSubresource(frameTex_.get(), 0, nullptr, frame, GB_W * sizeof(uint32_t), 0);
 
-      const UINT sw = GB_W * scale_;
-      for (int y = 0; y < GB_H; ++y)
+      // Destination rectangle: full height at the Game Boy's aspect ratio,
+      // or the whole screen when stretching.
+      float w = static_cast<float>(width_), h = static_cast<float>(height_);
+      float dw = w, dh = h;
+      if (mode_ == Mode::Fit)
       {
-         uint32_t *row = pixels_.data() + static_cast<size_t>(y) * scale_ * sw;
-         const gambatte::video_pixel_t *src = frame + y * GB_W;
-         for (int x = 0; x < GB_W; ++x)
-         {
-            uint32_t p = static_cast<uint32_t>(src[x]) | 0xFF000000u;
-            for (UINT k = 0; k < scale_; ++k)
-               row[x * scale_ + k] = p;
-         }
-         for (UINT k = 1; k < scale_; ++k)
-            std::memcpy(row + k * sw, row, sw * sizeof(uint32_t));
+         float s = std::min(w / GB_W, h / GB_H);
+         dw = std::floor(GB_W * s + 0.5f);
+         dh = std::floor(GB_H * s + 0.5f);
       }
-      context_->UpdateSubresource(scaled_.get(), 0, nullptr, pixels_.data(), sw * sizeof(uint32_t), 0);
+      D3D11_VIEWPORT vp{};
+      vp.TopLeftX = std::floor((w - dw) * 0.5f);
+      vp.TopLeftY = std::floor((h - dh) * 0.5f);
+      vp.Width    = dw;
+      vp.Height   = dh;
+      vp.MaxDepth = 1.0f;
+
+      Params p{ { float(GB_W), float(GB_H) }, { dw / GB_W, dh / GB_H } };
+      context_->UpdateSubresource(params_.get(), 0, nullptr, &p, 0, 0);
 
       const float black[4] = { 0.f, 0.f, 0.f, 1.f };
-      context_->ClearRenderTargetView(rtv_.get(), black);
-      UINT x0 = (width_ - sw) / 2;
-      UINT y0 = (height_ - GB_H * scale_) / 2;
-      context_->CopySubresourceRegion(backBuffer_.get(), 0, x0, y0, 0, scaled_.get(), 0, nullptr);
+      ID3D11RenderTargetView *rtv = rtv_.get();
+      context_->OMSetRenderTargets(1, &rtv, nullptr);
+      context_->ClearRenderTargetView(rtv, black);
+      context_->RSSetViewports(1, &vp);
+      context_->IASetInputLayout(nullptr);
+      context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+      context_->VSSetShader(vs_.get(), nullptr, 0);
+      context_->PSSetShader(ps_.get(), nullptr, 0);
+      ID3D11ShaderResourceView *srv = frameSrv_.get();
+      context_->PSSetShaderResources(0, 1, &srv);
+      ID3D11SamplerState *smp = sampler_.get();
+      context_->PSSetSamplers(0, 1, &smp);
+      ID3D11Buffer *cb = params_.get();
+      context_->PSSetConstantBuffers(0, 1, &cb);
+      context_->Draw(3, 0);
    }
 
    void Present()
@@ -377,6 +402,8 @@ public:
    }
 
 private:
+   struct Params { float texSize[2]; float scale[2]; };
+
    void UpdateSize(wuc::CoreWindow const &window)
    {
       auto bounds = window.Bounds();
@@ -387,34 +414,56 @@ private:
 
    void CreateTargets()
    {
-      winrt::check_hresult(swapChain_->GetBuffer(0, __uuidof(ID3D11Texture2D), backBuffer_.put_void()));
-      winrt::check_hresult(device_->CreateRenderTargetView(backBuffer_.get(), nullptr, rtv_.put()));
+      winrt::com_ptr<ID3D11Texture2D> backBuffer;
+      winrt::check_hresult(swapChain_->GetBuffer(0, __uuidof(ID3D11Texture2D), backBuffer.put_void()));
+      winrt::check_hresult(device_->CreateRenderTargetView(backBuffer.get(), nullptr, rtv_.put()));
    }
 
-   void CreateScaled(UINT scale)
+   void CreatePipeline()
    {
-      scale_ = scale;
-      scaled_ = nullptr;
+      winrt::check_hresult(device_->CreateVertexShader(g_FullscreenVS, sizeof(g_FullscreenVS), nullptr, vs_.put()));
+      winrt::check_hresult(device_->CreatePixelShader(g_SharpBilinearPS, sizeof(g_SharpBilinearPS), nullptr, ps_.put()));
+
       D3D11_TEXTURE2D_DESC td{};
-      td.Width            = GB_W * scale;
-      td.Height           = GB_H * scale;
+      td.Width            = GB_W;
+      td.Height           = GB_H;
       td.MipLevels        = 1;
       td.ArraySize        = 1;
       td.Format           = DXGI_FORMAT_B8G8R8A8_UNORM;
       td.SampleDesc.Count = 1;
       td.Usage            = D3D11_USAGE_DEFAULT;
-      winrt::check_hresult(device_->CreateTexture2D(&td, nullptr, scaled_.put()));
-      pixels_.assign(static_cast<size_t>(td.Width) * td.Height, 0xFF000000u);
+      td.BindFlags        = D3D11_BIND_SHADER_RESOURCE;
+      winrt::check_hresult(device_->CreateTexture2D(&td, nullptr, frameTex_.put()));
+      winrt::check_hresult(device_->CreateShaderResourceView(frameTex_.get(), nullptr, frameSrv_.put()));
+
+      D3D11_SAMPLER_DESC sd{};
+      sd.Filter         = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+      sd.AddressU       = D3D11_TEXTURE_ADDRESS_CLAMP;
+      sd.AddressV       = D3D11_TEXTURE_ADDRESS_CLAMP;
+      sd.AddressW       = D3D11_TEXTURE_ADDRESS_CLAMP;
+      sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
+      sd.MaxLOD         = D3D11_FLOAT32_MAX;
+      winrt::check_hresult(device_->CreateSamplerState(&sd, sampler_.put()));
+
+      D3D11_BUFFER_DESC bd{};
+      bd.ByteWidth = sizeof(Params);
+      bd.Usage     = D3D11_USAGE_DEFAULT;
+      bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+      winrt::check_hresult(device_->CreateBuffer(&bd, nullptr, params_.put()));
    }
 
    winrt::com_ptr<ID3D11Device> device_;
    winrt::com_ptr<ID3D11DeviceContext> context_;
    winrt::com_ptr<IDXGISwapChain1> swapChain_;
-   winrt::com_ptr<ID3D11Texture2D> backBuffer_;
    winrt::com_ptr<ID3D11RenderTargetView> rtv_;
-   winrt::com_ptr<ID3D11Texture2D> scaled_;
-   std::vector<uint32_t> pixels_;
-   UINT width_ = 0, height_ = 0, scale_ = 0;
+   winrt::com_ptr<ID3D11VertexShader> vs_;
+   winrt::com_ptr<ID3D11PixelShader> ps_;
+   winrt::com_ptr<ID3D11Texture2D> frameTex_;
+   winrt::com_ptr<ID3D11ShaderResourceView> frameSrv_;
+   winrt::com_ptr<ID3D11SamplerState> sampler_;
+   winrt::com_ptr<ID3D11Buffer> params_;
+   UINT width_ = 0, height_ = 0;
+   Mode mode_ = Mode::Fit;
    bool lost_ = false;
 };
 
@@ -465,6 +514,9 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
       wac::CoreApplication::Resuming({ this, &App::OnResuming });
       // Touching the Gamepads collection early makes it start tracking pads.
       gamepadAdded_ = wgi::Gamepad::GamepadAdded([](auto &&, auto &&) {});
+      // On PC, open full screen (Xbox apps are always full screen).
+      wuvm::ApplicationView::PreferredLaunchWindowingMode(
+         wuvm::ApplicationViewWindowingMode::FullScreen);
    }
 
    void Load(winrt::hstring const &) {}
@@ -478,7 +530,16 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
          visible_ = args.Visible();
       });
       window.SizeChanged([this](auto &&, auto &&) { if (ready_) renderer_.Resize(window_); });
-      window.KeyDown([this](auto &&, wuc::KeyEventArgs const &args) { keyboard_.Set(args.VirtualKey(), true); });
+      window.KeyDown([this](auto &&, wuc::KeyEventArgs const &args) {
+         auto key = args.VirtualKey();
+         bool repeat = args.KeyStatus().WasKeyDown;
+         if (key == wsys::VirtualKey::F && !repeat)
+            ToggleViewMode();
+         else if (key == wsys::VirtualKey::F11 && !repeat)
+            ToggleFullScreen();
+         else
+            keyboard_.Set(key, true);
+      });
       window.KeyUp([this](auto &&, wuc::KeyEventArgs const &args) { keyboard_.Set(args.VirtualKey(), false); });
 
       // On Xbox the B button raises "back"; swallow it so the game gets it.
@@ -498,7 +559,11 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
       window_.Activate();
       auto dispatcher = window_.Dispatcher();
 
+      try { wuvm::ApplicationView::GetForCurrentView().TryEnterFullScreenMode(); }
+      catch (...) {}
+
       renderer_.Init(window_);
+      renderer_.SetMode(LoadStretchSetting() ? Renderer::Mode::Stretch : Renderer::Mode::Fit);
       audio_.Init();
 
       std::wstring romPath = std::wstring(wa::Package::Current().InstalledLocation().Path()) + L"\\Rom\\pokesilver.gbc";
@@ -565,6 +630,7 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
       using GB = wgi::GamepadButtons;
       unsigned s = keyboard_.buttons;
       fast = keyboard_.fast;
+      bool toggle = false;
 
       for (auto const &pad : wgi::Gamepad::Gamepads())
       {
@@ -585,12 +651,53 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
          if (r.LeftThumbstickX < -0.5) s |= IG::LEFT;
          if (r.LeftThumbstickX >  0.5) s |= IG::RIGHT;
          if (r.RightTrigger > 0.5) fast = true;
+         if (Has(b, GB::LeftThumbstick)) toggle = true;
       }
+
+      // Left stick click switches between fit-to-height and stretch.
+      if (toggle && !toggleHeld_)
+         ToggleViewMode();
+      toggleHeld_ = toggle;
 
       // The Game Boy can't press opposite directions at once.
       if ((s & IG::UP) && (s & IG::DOWN))    s &= ~(IG::UP | IG::DOWN);
       if ((s & IG::LEFT) && (s & IG::RIGHT)) s &= ~(IG::LEFT | IG::RIGHT);
       return s;
+   }
+
+   void ToggleViewMode()
+   {
+      bool stretch = renderer_.GetMode() != Renderer::Mode::Stretch;
+      renderer_.SetMode(stretch ? Renderer::Mode::Stretch : Renderer::Mode::Fit);
+      try
+      {
+         ws::ApplicationData::Current().LocalSettings().Values().Insert(
+            L"stretch", winrt::box_value(stretch));
+      }
+      catch (...) {}
+   }
+
+   static bool LoadStretchSetting()
+   {
+      try
+      {
+         auto v = ws::ApplicationData::Current().LocalSettings().Values().TryLookup(L"stretch");
+         return v ? winrt::unbox_value_or<bool>(v, false) : false;
+      }
+      catch (...) { return false; }
+   }
+
+   static void ToggleFullScreen()
+   {
+      try
+      {
+         auto view = wuvm::ApplicationView::GetForCurrentView();
+         if (view.IsFullScreenMode())
+            view.ExitFullScreenMode();
+         else
+            view.TryEnterFullScreenMode();
+      }
+      catch (...) {}
    }
 
    void OnActivated(wac::CoreApplicationView const &, wa::Activation::IActivatedEventArgs const &)
@@ -626,6 +733,7 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
    bool visible_ = true;
    bool suspended_ = false;
    bool ready_ = false;
+   bool toggleHeld_ = false;
 };
 
 } // namespace
