@@ -11,6 +11,7 @@
 #include <sys/types.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -46,7 +47,7 @@ const char *const ROM_PATH  = "/app0/assets/misc/pokesilver.gbc";
 const char *const SAVE_DIR  = "/data/pokesilver";
 const char *const SAVE_PATH = "/data/pokesilver/pokesilver.srm";
 const char *const RTC_PATH  = "/data/pokesilver/pokesilver.rtc";
-const char *const CFG_PATH  = "/data/pokesilver/stretch.cfg";
+const char *const CFG_PATH  = "/data/pokesilver/view.cfg";
 
 // PS4 controller button indices exposed by the OpenOrbis SDL2 joystick driver.
 enum PadButton
@@ -201,8 +202,27 @@ private:
 class Scaler
 {
 public:
+   Scaler()
+   {
+      // Brighten for TVs: lift midtones (gamma 0.75).
+      for (int i = 0; i < 256; ++i)
+      {
+         double v = std::pow(i / 255.0, 0.75) * 255.0 + 0.5;
+         lut_[i] = static_cast<uint8_t>(v > 255.0 ? 255.0 : v);
+      }
+   }
+
    void Draw(SDL_Surface *surface, const gambatte::video_pixel_t *frame, bool stretch)
    {
+      // Apply brightness to the small source frame once, then scale.
+      for (int i = 0; i < GB_W * GB_H; ++i)
+      {
+         uint32_t p = static_cast<uint32_t>(frame[i]);
+         bright_[i] = (uint32_t(lut_[(p >> 16) & 0xFF]) << 16) |
+                      (uint32_t(lut_[(p >> 8) & 0xFF]) << 8) | lut_[p & 0xFF];
+      }
+      frame = bright_;
+
       const int W = surface->w, H = surface->h;
       int dw = W, dh = H;
       if (!stretch)
@@ -274,6 +294,8 @@ public:
    }
 
 private:
+   uint8_t lut_[256];
+   gambatte::video_pixel_t bright_[GB_W * GB_H];
    std::vector<int> xmap_;
    int mapW_ = -1;
    bool lastStretch_ = false;
@@ -357,7 +379,8 @@ private:
 bool LoadStretch()
 {
    std::vector<uint8_t> d;
-   return ReadFile(CFG_PATH, d) && !d.empty() && d[0] == '1';
+   // Default is widescreen fill; '0' is stored only when the user picks fit.
+   return !(ReadFile(CFG_PATH, d) && !d.empty() && d[0] == '0');
 }
 
 void SaveStretch(bool stretch)

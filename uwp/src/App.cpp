@@ -463,7 +463,7 @@ private:
    winrt::com_ptr<ID3D11SamplerState> sampler_;
    winrt::com_ptr<ID3D11Buffer> params_;
    UINT width_ = 0, height_ = 0;
-   Mode mode_ = Mode::Fit;
+   Mode mode_ = Mode::Stretch;
    bool lost_ = false;
 };
 
@@ -654,7 +654,7 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
          if (Has(b, GB::LeftThumbstick)) toggle = true;
       }
 
-      // Left stick click switches between fit-to-height and stretch.
+      // Left stick click switches between widescreen fill and original shape.
       if (toggle && !toggleHeld_)
          ToggleViewMode();
       toggleHeld_ = toggle;
@@ -672,7 +672,7 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
       try
       {
          ws::ApplicationData::Current().LocalSettings().Values().Insert(
-            L"stretch", winrt::box_value(stretch));
+            L"fit", winrt::box_value(!stretch));
       }
       catch (...) {}
    }
@@ -681,10 +681,11 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
    {
       try
       {
-         auto v = ws::ApplicationData::Current().LocalSettings().Values().TryLookup(L"stretch");
-         return v ? winrt::unbox_value_or<bool>(v, false) : false;
+         // Default is widescreen fill; "fit" is stored only when the user picks it.
+         auto v = ws::ApplicationData::Current().LocalSettings().Values().TryLookup(L"fit");
+         return v ? !winrt::unbox_value_or<bool>(v, false) : true;
       }
-      catch (...) { return false; }
+      catch (...) { return true; }
    }
 
    static void ToggleFullScreen()
