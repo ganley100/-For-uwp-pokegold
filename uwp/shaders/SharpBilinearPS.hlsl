@@ -7,6 +7,9 @@ cbuffer Params : register(b0)
 {
    float2 texSize;   // 160, 144
    float2 scale;     // output pixels per source pixel (x, y)
+   float  gamma;     // brightness: midtone lift (1 = original)
+   float  gain;      // brightness: overall gain (1 = original)
+   float2 pad;
 };
 
 float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
@@ -18,8 +21,8 @@ float4 main(float4 pos : SV_Position, float2 uv : TEXCOORD0) : SV_Target
    float2 centerDist  = s - 0.5;
    float2 f = (centerDist - clamp(centerDist, -regionRange, regionRange)) * scale + 0.5;
    float3 rgb = frameTex.Sample(linearSm, (texelFloor + f) / texSize).rgb;
-   // Brighten for TVs: lift midtones (gamma 0.75) and add a touch of saturation.
-   rgb = pow(saturate(rgb), 0.75);
+   // Brighten for TVs (user-selectable level) and add a touch of saturation.
+   rgb = saturate(pow(saturate(rgb), gamma) * gain);
    float luma = dot(rgb, float3(0.299, 0.587, 0.114));
    rgb = saturate(lerp(float3(luma, luma, luma), rgb, 1.15));
    return float4(rgb, 1.0);

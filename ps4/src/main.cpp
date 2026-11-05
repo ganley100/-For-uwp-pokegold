@@ -202,12 +202,21 @@ private:
 class Scaler
 {
 public:
-   Scaler()
+   static constexpr int kLevels = 5;
+   static constexpr int kDefaultLevel = 3;
+
+   Scaler() { SetBrightness(kDefaultLevel); }
+
+   // Brightness levels for TVs: lift midtones (gamma) and add some gain.
+   // 0 = original colours ... 4 = brightest.
+   void SetBrightness(int level)
    {
-      // Brighten for TVs: lift midtones (gamma 0.75).
+      static const double gamma[kLevels] = { 1.00, 0.80, 0.65, 0.55, 0.45 };
+      static const double gain[kLevels]  = { 1.00, 1.00, 1.05, 1.12, 1.20 };
+      level = level < 0 ? 0 : (level >= kLevels ? kLevels - 1 : level);
       for (int i = 0; i < 256; ++i)
       {
-         double v = std::pow(i / 255.0, 0.75) * 255.0 + 0.5;
+         double v = std::pow(i / 255.0, gamma[level]) * gain[level] * 255.0 + 0.5;
          lut_[i] = static_cast<uint8_t>(v > 255.0 ? 255.0 : v);
       }
    }
@@ -325,12 +334,12 @@ public:
    }
 
    // Returns Game Boy buttons; sets fast-forward and view-toggle (edge) flags.
-   unsigned Poll(bool &fast, bool &toggleView)
+   unsigned Poll(bool &fast, bool &toggleView, bool &cycleBright)
    {
       using IG = gambatte::InputGetter;
       unsigned s = 0;
       fast = false;
-      bool toggle = false;
+      bool toggle = false, bright = false;
       if (joy_)
       {
          auto btn = [this](int i) { return i < SDL_JoystickNumButtons(joy_) && SDL_JoystickGetButton(joy_, i); };
@@ -344,6 +353,7 @@ public:
          if (btn(PAD_RIGHT)) s |= IG::RIGHT;
          if (btn(PAD_R2) || btn(PAD_R1)) fast = true;
          toggle = btn(PAD_L3);
+         bright = btn(PAD_R3);
 
          if (SDL_JoystickNumHats(joy_) > 0)
          {
@@ -368,12 +378,15 @@ public:
 
       toggleView = toggle && !toggleHeld_;
       toggleHeld_ = toggle;
+      cycleBright = bright && !brightHeld_;
+      brightHeld_ = bright;
       return s;
    }
 
 private:
    SDL_Joystick *joy_ = nullptr;
    bool toggleHeld_ = false;
+   bool brightHeld_ = false;
 };
 
 bool LoadStretch()
@@ -387,6 +400,22 @@ void SaveStretch(bool stretch)
 {
    const char c = stretch ? '1' : '0';
    WriteFileAtomic(CFG_PATH, &c, 1);
+}
+
+const char *const BRIGHT_PATH = "/data/pokesilver/brightness.cfg";
+
+int LoadBrightness(int fallback)
+{
+   std::vector<uint8_t> d;
+   if (ReadFile(BRIGHT_PATH, d) && !d.empty() && d[0] >= '0' && d[0] <= '9')
+      return d[0] - '0';
+   return fallback;
+}
+
+void SaveBrightness(int level)
+{
+   const char c = static_cast<char>('0' + level);
+   WriteFileAtomic(BRIGHT_PATH, &c, 1);
 }
 
 void Halt(const char *what)
@@ -433,6 +462,9 @@ int main(int, char *[])
    input.Open();
    Scaler scaler;
    bool stretch = LoadStretch();
+   int brightness = LoadBrightness(Scaler::kDefaultLevel);
+   if (brightness >= Scaler::kLevels) brightness = Scaler::kDefaultLevel;
+   scaler.SetBrightness(brightness);
    Uint32 lastFlush = SDL_GetTicks();
 
    for (;;)
@@ -441,8 +473,14 @@ int main(int, char *[])
       while (SDL_PollEvent(&ev))
          input.OnEvent(ev);
 
-      bool fast = false, toggleView = false;
-      emulator.SetButtons(input.Poll(fast, toggleView));
+      bool fast = false, toggleView = false, cycleBright = false;
+      emulator.SetButtons(input.Poll(fast, toggleView, cycleBright));
+      if (cycleBright)
+      {
+         brightness = (brightness + 1) % Scaler::kLevels;
+         scaler.SetBrightness(brightness);
+         SaveBrightness(brightness);
+      }
       if (toggleView)
       {
          stretch = !stretch;

@@ -338,7 +338,18 @@ public:
       CreateTargets();
    }
 
+   static constexpr int kLevels = 5;
+   static constexpr int kDefaultLevel = 3;
+
    void SetMode(Mode mode) { mode_ = mode; }
+   void SetBrightness(int level)
+   {
+      static const float gamma[kLevels] = { 1.00f, 0.80f, 0.65f, 0.55f, 0.45f };
+      static const float gain[kLevels]  = { 1.00f, 1.00f, 1.05f, 1.12f, 1.20f };
+      level = level < 0 ? 0 : (level >= kLevels ? kLevels - 1 : level);
+      gamma_ = gamma[level];
+      gain_ = gain[level];
+   }
    Mode GetMode() const { return mode_; }
 
    void Draw(const gambatte::video_pixel_t *frame)
@@ -362,7 +373,7 @@ public:
       vp.Height   = dh;
       vp.MaxDepth = 1.0f;
 
-      Params p{ { float(GB_W), float(GB_H) }, { dw / GB_W, dh / GB_H } };
+      Params p{ { float(GB_W), float(GB_H) }, { dw / GB_W, dh / GB_H }, gamma_, gain_, { 0.f, 0.f } };
       context_->UpdateSubresource(params_.get(), 0, nullptr, &p, 0, 0);
 
       const float black[4] = { 0.f, 0.f, 0.f, 1.f };
@@ -402,7 +413,7 @@ public:
    }
 
 private:
-   struct Params { float texSize[2]; float scale[2]; };
+   struct Params { float texSize[2]; float scale[2]; float gamma; float gain; float pad[2]; };
 
    void UpdateSize(wuc::CoreWindow const &window)
    {
@@ -464,6 +475,7 @@ private:
    winrt::com_ptr<ID3D11Buffer> params_;
    UINT width_ = 0, height_ = 0;
    Mode mode_ = Mode::Stretch;
+   float gamma_ = 0.55f, gain_ = 1.12f;
    bool lost_ = false;
 };
 
@@ -535,6 +547,8 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
          bool repeat = args.KeyStatus().WasKeyDown;
          if (key == wsys::VirtualKey::F && !repeat)
             ToggleViewMode();
+         else if (key == wsys::VirtualKey::G && !repeat)
+            CycleBrightness();
          else if (key == wsys::VirtualKey::F11 && !repeat)
             ToggleFullScreen();
          else
@@ -564,6 +578,8 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
 
       renderer_.Init(window_);
       renderer_.SetMode(LoadStretchSetting() ? Renderer::Mode::Stretch : Renderer::Mode::Fit);
+      brightness_ = LoadBrightnessSetting();
+      renderer_.SetBrightness(brightness_);
       audio_.Init();
 
       std::wstring romPath = std::wstring(wa::Package::Current().InstalledLocation().Path()) + L"\\Rom\\pokesilver.gbc";
@@ -630,7 +646,7 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
       using GB = wgi::GamepadButtons;
       unsigned s = keyboard_.buttons;
       fast = keyboard_.fast;
-      bool toggle = false;
+      bool toggle = false, bright = false;
 
       for (auto const &pad : wgi::Gamepad::Gamepads())
       {
@@ -652,12 +668,18 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
          if (r.LeftThumbstickX >  0.5) s |= IG::RIGHT;
          if (r.RightTrigger > 0.5) fast = true;
          if (Has(b, GB::LeftThumbstick)) toggle = true;
+         if (Has(b, GB::RightThumbstick)) bright = true;
       }
 
       // Left stick click switches between widescreen fill and original shape.
       if (toggle && !toggleHeld_)
          ToggleViewMode();
       toggleHeld_ = toggle;
+
+      // Right stick click cycles the brightness level.
+      if (bright && !brightHeld_)
+         CycleBrightness();
+      brightHeld_ = bright;
 
       // The Game Boy can't press opposite directions at once.
       if ((s & IG::UP) && (s & IG::DOWN))    s &= ~(IG::UP | IG::DOWN);
@@ -675,6 +697,29 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
             L"fit", winrt::box_value(!stretch));
       }
       catch (...) {}
+   }
+
+   void CycleBrightness()
+   {
+      brightness_ = (brightness_ + 1) % Renderer::kLevels;
+      renderer_.SetBrightness(brightness_);
+      try
+      {
+         ws::ApplicationData::Current().LocalSettings().Values().Insert(
+            L"brightness", winrt::box_value(static_cast<int32_t>(brightness_)));
+      }
+      catch (...) {}
+   }
+
+   static int LoadBrightnessSetting()
+   {
+      try
+      {
+         auto v = ws::ApplicationData::Current().LocalSettings().Values().TryLookup(L"brightness");
+         int level = v ? winrt::unbox_value_or<int32_t>(v, Renderer::kDefaultLevel) : Renderer::kDefaultLevel;
+         return (level >= 0 && level < Renderer::kLevels) ? level : Renderer::kDefaultLevel;
+      }
+      catch (...) { return Renderer::kDefaultLevel; }
    }
 
    static bool LoadStretchSetting()
@@ -735,6 +780,8 @@ struct App : winrt::implements<App, wac::IFrameworkViewSource, wac::IFrameworkVi
    bool suspended_ = false;
    bool ready_ = false;
    bool toggleHeld_ = false;
+   bool brightHeld_ = false;
+   int brightness_ = Renderer::kDefaultLevel;
 };
 
 } // namespace
